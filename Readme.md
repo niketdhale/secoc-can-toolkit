@@ -103,4 +103,3 @@ secoc-can-toolkit/
 > provisioning, and full AUTOSAR BSW integration per ISO 21434.
 
 MIT License. See the LICENSE file for details.
-```
