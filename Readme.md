@@ -24,7 +24,7 @@ A lightweight C++17 command-line toolkit for simulating AUTOSAR Secure Onboard C
 
 ```bash
 # Clone and navigate to the project directory
-git clone https://github.com/YOUR_USERNAME/secoc-can-toolkit.git
+git clone https://github.com/niketdhale/secoc-can-toolkit.git
 cd secoc-can-toolkit
 
 # Create build directory and configure
