@@ -1,0 +1,8 @@
+# ninja log v7
+1	1342	1777517017129282516	CMakeFiles/secoc_core.dir/src/FreshnessManager.cpp.o	3bb8fe455c3a737
+0	1902	1777517017127547374	CMakeFiles/secoc_core.dir/src/CanEngine.cpp.o	4b3d9bc6618cfd4e
+3	2276	1777517017130548874	CMakeFiles/secoc_core.dir/src/SecOc_AutosarApi.cpp.o	a78b7c14fb065965
+1	2353	1777517017128547874	CMakeFiles/secoc_core.dir/src/SecOcEngine.cpp.o	a71c1659d4d81b32
+2353	2444	1777517019481453046	libsecoc_core.a	a242e0cffb53bfd1
+3	2679	1777517017131341521	CMakeFiles/secoc_cli.dir/apps/can_cli/main.cpp.o	576f71840ffd2e6b
+2679	2833	1777517019807620330	secoc_cli	d5d99f23bb1d1a8c

@@ -1,0 +1,7 @@
+{
+	"InstallScripts" : 
+	[
+		"/home/niket/Development/can-core/build/cmake_install.cmake"
+	],
+	"Parallel" : false
+}
