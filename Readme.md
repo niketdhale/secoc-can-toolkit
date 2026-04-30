@@ -39,11 +39,12 @@ sudo setcap cap_net_raw,cap_net_admin=+ep ./secoc_cli
 
 # Launch the CLI
 ./secoc_cli
+```
 
-
-Usage Examples
+## Usage Examples
 Start the CLI and follow the interactive commands:
 
+```bash
 # Open virtual CAN interface
 open vcan0
 
@@ -62,13 +63,12 @@ secoc test_c_api
 
 # Exit application
 quit
+```
 
-
-
-Project Structure
-
+## Project Structure
+```text
 secoc-can-toolkit/
-── CMakeLists.txt
+├── CMakeLists.txt
 ├── README.md
 ├── LICENSE
 ├── include/
@@ -86,28 +86,21 @@ secoc-can-toolkit/
 └── apps/
     └── can_cli/
         └── main.cpp
+```
 
+## AUTOSAR Compliance Notes
 
-AUTOSAR Compliance Notes
-Specification Requirement
-Implementation Status
-Notes
-Secured PDU Structure
-Compliant
-[Header][Payload][FV][MAC] per PRS_SecOc
-Big Endian Encoding
-Compliant
-All FV/MAC fields serialized MSB-first
-AES-128-CMAC
-Compliant
-OpenSSL backend (simulator grade)
-Freshness Anti-Replay
-Compliant
-Configurable acceptance window validation
-Production HSM / Key Management
-Not Implemented
-Requires Csm integration & secure storage
-Note: This toolkit is designed for simulation, HIL testing, and educational purposes. Production vehicle deployment requires certified cryptographic modules, secure key provisioning, and full AUTOSAR BSW integration per ISO 21434.
-License
+| Specification Requirement | Implementation Status | Notes |
+| :--- | :--- | :--- |
+| **Secured PDU Structure** | Compliant | `[Header][Payload][FV][MAC]` per PRS_SecOc |
+| **Big Endian Encoding** | Compliant | All FV/MAC fields serialized MSB-first |
+| **AES-128-CMAC** | Compliant | OpenSSL backend (simulator grade) |
+| **Freshness Anti-Replay** | Compliant | Configurable acceptance window validation |
+| **Production HSM / Key Management** | Not Implemented | Requires Csm integration & secure storage |
+
+> **Note:** This toolkit is designed for simulation, HIL testing, and educational purposes. 
+> Production vehicle deployment requires certified cryptographic modules, secure key 
+> provisioning, and full AUTOSAR BSW integration per ISO 21434.
+
 MIT License. See the LICENSE file for details.
 ```
