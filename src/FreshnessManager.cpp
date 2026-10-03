@@ -16,12 +16,11 @@ std::pair<std::vector<uint8_t>, uint16_t> SimulatedFreshnessManager::getFreshnes
     if (m_mode == Mode::Counter) {
         // Return 64-bit counter in Big Endian
         std::vector<uint8_t> be(8);
+        uint64_t value = m_counter; // serialize a copy; do not mutate m_counter
         for (int i = 7; i >= 0; --i) {
-            be[i] = m_counter & 0xFF;
-            m_counter >>= 8;
+            be[i] = value & 0xFF;
+            value >>= 8;
         }
-        // Restore counter (we consumed it above)
-        m_counter = (m_counter << 8) | be[7]; // Simplified for demo
         return {be, 64}; // 64-bit FV
     } else {
         // Return timestamp in Big Endian (64-bit milliseconds)
@@ -41,6 +40,13 @@ void SimulatedFreshnessManager::confirmFreshness(uint16_t /*data_id*/, bool veri
         m_counter++; // Increment only on successful verification
     }
     // Timestamp mode: no action needed (time advances naturally)
+}
+
+void SimulatedFreshnessManager::acceptFreshness(uint16_t /*data_id*/, uint64_t verified_fv) {
+    if (m_mode != Mode::Counter) return;
+    std::lock_guard<std::mutex> lock(m_mutex);
+    // Advance past the verified FV so it (and anything older) can't be replayed
+    if (verified_fv != UINT64_MAX && verified_fv + 1 > m_counter) m_counter = verified_fv + 1;
 }
 
 void SimulatedFreshnessManager::setCounterValue(uint64_t val) {

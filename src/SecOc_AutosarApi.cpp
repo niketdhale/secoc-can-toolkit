@@ -28,7 +28,7 @@ uint8_t SecOc_Init(const SecOc_ConfigType* config) {
     cpp_cfg.auth_key = {config->SecOCAuthKey, config->SecOCAuthKey + 16};
     cpp_cfg.use_timestamp_fv = config->SecOCUseTimestampFv;
     
-    engine->setConfig(cpp_cfg);
+    if (!engine->setConfig(cpp_cfg)) return SECOC_E_PARAM;
     
     if (cpp_cfg.use_timestamp_fv) {
         engine->setFreshnessProvider(
@@ -62,8 +62,11 @@ uint8_t SecOc_Transmit(
     uint8_t* SecuredPduBuffer,
     uint16_t* SecuredPduLength) 
 {
-    if (!g_initialized || !Payload || !SecuredPduBuffer || !SecuredPduLength) 
+    if (!Payload || !SecuredPduBuffer || !SecuredPduLength) 
         return SECOC_E_PARAM;
+    
+    std::lock_guard<std::mutex> lock(g_init_mutex);
+    if (!g_initialized) return SECOC_E_PARAM;
     
     auto it = g_secoc_instances.find(DataId);
     if (it == g_secoc_instances.end()) return SECOC_E_PARAM;
@@ -74,6 +77,10 @@ uint8_t SecOc_Transmit(
     if (result.status != SecOcResult::Status::Ok) {
         return (result.status == SecOcResult::Status::CryptoError) ? SECOC_E_CRYPTO : SECOC_E_NOT_OK;
     }
+    
+    size_t total = result.pdu.header.size() + result.pdu.payload.size() +
+                   result.pdu.freshness.size() + result.pdu.mac.size();
+    if (total > *SecuredPduLength) return SECOC_E_PARAM;  // buffer too small
     
     size_t offset = 0;
     
@@ -103,14 +110,20 @@ uint8_t SecOc_Receive(
     uint16_t* PayloadLength,
     bool* FreshnessVerified) 
 {
-    if (!g_initialized || !SecuredPdu || !PayloadBuffer || !PayloadLength || !FreshnessVerified) 
+    if (!SecuredPdu || !PayloadBuffer || !PayloadLength || !FreshnessVerified) 
         return SECOC_E_PARAM;
+    
+    std::lock_guard<std::mutex> lock(g_init_mutex);
+    if (!g_initialized) return SECOC_E_PARAM;
     
     auto it = g_secoc_instances.find(DataId);
     if (it == g_secoc_instances.end()) return SECOC_E_PARAM;
     
     const auto& cfg = it->second->getConfig();
-    size_t offset = 0;
+    size_t offset = cfg.auth_pdu_header_length;
+    size_t trailer_len = static_cast<size_t>(cfg.fv_trunc_length) + cfg.mac_trunc_length;
+    if (SecuredPduLength < offset + trailer_len) return SECOC_E_PARAM;
+    offset = 0;
     
     SecOcPdu pdu;
     
@@ -118,9 +131,6 @@ uint8_t SecOc_Receive(
         pdu.header.assign(SecuredPdu + offset, SecuredPdu + offset + cfg.auth_pdu_header_length);
         offset += cfg.auth_pdu_header_length;
     }
-    
-    size_t trailer_len = cfg.fv_trunc_length + cfg.mac_trunc_length;
-    if (SecuredPduLength < offset + trailer_len) return SECOC_E_PARAM;
     
     pdu.freshness.assign(SecuredPdu + SecuredPduLength - trailer_len, 
                          SecuredPdu + SecuredPduLength - cfg.mac_trunc_length);
@@ -147,9 +157,10 @@ uint8_t SecOc_Receive(
 }
 
 uint64_t SecOc_GetCurrentFreshness(uint16_t DataId) {
+    std::lock_guard<std::mutex> lock(g_init_mutex);
     auto it = g_secoc_instances.find(DataId);
     if (it == g_secoc_instances.end()) return 0;
-    return 0;
+    return it->second->getCurrentFreshness();
 }
 
 } // extern "C"

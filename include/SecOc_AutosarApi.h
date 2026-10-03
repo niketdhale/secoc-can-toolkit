@@ -30,6 +30,8 @@ uint8_t SecOc_DeInit(void);
 uint8_t SecOc_MainFunction(void);  // For polling mode (optional)
 
 // TX path: Application calls this to send secured data [SWS_SecOC_00200]
+// *SecuredPduLength is in/out: on input the capacity of SecuredPduBuffer in bytes,
+// on output the number of bytes written. Returns SECOC_E_PARAM if it is too small.
 uint8_t SecOc_Transmit(
     uint16_t DataId,
     const uint8_t* Payload,
