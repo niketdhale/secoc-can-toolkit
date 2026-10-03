@@ -42,6 +42,13 @@ void SimulatedFreshnessManager::confirmFreshness(uint16_t /*data_id*/, bool veri
     // Timestamp mode: no action needed (time advances naturally)
 }
 
+void SimulatedFreshnessManager::acceptFreshness(uint16_t /*data_id*/, uint64_t verified_fv) {
+    if (m_mode != Mode::Counter) return;
+    std::lock_guard<std::mutex> lock(m_mutex);
+    // Advance past the verified FV so it (and anything older) can't be replayed
+    if (verified_fv != UINT64_MAX && verified_fv + 1 > m_counter) m_counter = verified_fv + 1;
+}
+
 void SimulatedFreshnessManager::setCounterValue(uint64_t val) {
     std::lock_guard<std::mutex> lock(m_mutex);
     m_counter = val;

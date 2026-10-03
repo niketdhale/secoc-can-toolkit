@@ -206,7 +206,7 @@ SecOcResult SecOcEngine::unwrapRx(const SecOcPdu& secured_pdu) {
     res.freshness_verified = true;
     res.pdu = secured_pdu;
     
-    m_active_fv_provider->confirmFreshness(m_config.data_id, true);
+    m_active_fv_provider->acceptFreshness(m_config.data_id, received_fv);
     
     return res;
 }

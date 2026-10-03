@@ -15,6 +15,13 @@ public:
     
     // Confirm FV usage (for synchronization in distributed systems)
     virtual void confirmFreshness(uint16_t data_id, bool verification_success) = 0;
+
+    // Confirm a verified RX FV; the next acceptable FV must be greater than it.
+    // Default falls back to confirmFreshness() for providers that don't track RX values.
+    virtual void acceptFreshness(uint16_t data_id, uint64_t verified_fv) {
+        (void)verified_fv;
+        confirmFreshness(data_id, true);
+    }
 };
 
 // Built-in simulator implementation (counter-based or timestamp-based)
@@ -26,6 +33,7 @@ public:
     
     std::pair<std::vector<uint8_t>, uint16_t> getFreshness(uint16_t data_id) override;
     void confirmFreshness(uint16_t data_id, bool verification_success) override;
+    void acceptFreshness(uint16_t data_id, uint64_t verified_fv) override;
     
     // For testing: manually set counter/timestamp
     void setCounterValue(uint64_t val);
