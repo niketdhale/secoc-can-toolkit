@@ -8,13 +8,15 @@
 #include <poll.h>
 #include <cstring>
 #include <chrono>
+#include <cerrno>
+#include <algorithm>
 
 bool CanEngine::open(const std::string& iface) {
     close();
     m_sock = socket(AF_CAN, SOCK_RAW, CAN_RAW);
     if (m_sock < 0) return false;
 
-    struct ifreq ifr;
+    struct ifreq ifr{};
     std::strncpy(ifr.ifr_name, iface.c_str(), IFNAMSIZ - 1);
     if (ioctl(m_sock, SIOCGIFINDEX, &ifr) < 0) {
         ::close(m_sock); m_sock = -1; return false;
@@ -50,6 +52,10 @@ void CanEngine::close() {
 bool CanEngine::send(const CanFrame& frame) {
     if (!m_is_open) return false;
 
+    if (frame.data.size() > (frame.is_fd ? static_cast<size_t>(CANFD_MAX_DLEN)
+                                         : static_cast<size_t>(CAN_MAX_DLEN)))
+        return false;
+
     if (frame.is_fd) {
         struct canfd_frame fd_frame{};
         fd_frame.can_id = frame.id | (frame.is_extended ? CAN_EFF_FLAG : 0) | CANFD_BRS;
@@ -82,10 +88,19 @@ void CanEngine::rxLoop() {
         if (ret > 0 && (pfd.revents & POLLIN)) {
             struct canfd_frame fd_frame;
             ssize_t nbytes = read(m_sock, &fd_frame, sizeof(fd_frame));
-            if (nbytes < 0) continue;
+            if (nbytes < 0) {
+                if (errno == EINTR || errno == EAGAIN) continue;
+                {
+                    std::lock_guard<std::mutex> lock(m_cb_mutex);
+                    if (m_err_cb) m_err_cb(std::string("CAN read error: ") + std::strerror(errno));
+                }
+                std::this_thread::sleep_for(std::chrono::milliseconds(100)); // back off
+                continue;
+            }
+            if (nbytes != static_cast<ssize_t>(CAN_MTU) && nbytes != static_cast<ssize_t>(CANFD_MTU)) continue;
 
             CanFrame frame;
-            frame.is_fd = (fd_frame.len > CAN_MAX_DLEN);
+            frame.is_fd = (nbytes == static_cast<ssize_t>(CANFD_MTU));
             frame.is_extended = fd_frame.can_id & CAN_EFF_FLAG;
             frame.id = fd_frame.can_id & CAN_EFF_MASK;
             frame.timestamp_ns = std::chrono::duration_cast<std::chrono::nanoseconds>(

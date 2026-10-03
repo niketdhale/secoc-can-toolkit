@@ -16,12 +16,11 @@ std::pair<std::vector<uint8_t>, uint16_t> SimulatedFreshnessManager::getFreshnes
     if (m_mode == Mode::Counter) {
         // Return 64-bit counter in Big Endian
         std::vector<uint8_t> be(8);
+        uint64_t value = m_counter; // serialize a copy; do not mutate m_counter
         for (int i = 7; i >= 0; --i) {
-            be[i] = m_counter & 0xFF;
-            m_counter >>= 8;
+            be[i] = value & 0xFF;
+            value >>= 8;
         }
-        // Restore counter (we consumed it above)
-        m_counter = (m_counter << 8) | be[7]; // Simplified for demo
         return {be, 64}; // 64-bit FV
     } else {
         // Return timestamp in Big Endian (64-bit milliseconds)

@@ -11,12 +11,16 @@ public:
     ~SecOcEngine();
     
     // Configuration
-    void setConfig(const SecOcConfig& cfg);
+    // Returns false (config unchanged) if invalid: 1<=mac<=16, 1<=fv<=8, key == 16 bytes
+    bool setConfig(const SecOcConfig& cfg);
     const SecOcConfig& getConfig() const { return m_config; }
     
     // Freshness Manager injection (external FVM or internal simulator)
     void setFreshnessProvider(std::unique_ptr<IFreshnessProvider> provider);
     
+    // Next FV the active provider would use (full width)
+    uint64_t getCurrentFreshness();
+
     // Core operations [PRS_SecOc_00200 series]
     SecOcResult wrapTx(const std::vector<uint8_t>& payload);
     SecOcResult unwrapRx(const SecOcPdu& secured_pdu);
@@ -38,9 +42,12 @@ private:
     // Cryptographic backend (OpenSSL AES-CMAC)
     std::vector<uint8_t> computeMacAesCmac(const std::vector<uint8_t>& data) const;
     
-    // Helper: truncate Big Endian byte array to N bytes
+    // Helper: keep the leading N bytes (MAC truncation per AUTOSAR)
     static std::vector<uint8_t> truncateBe(const std::vector<uint8_t>& be_data, uint8_t target_bytes);
     
+    // Helper: keep the low-order (last) N bytes (FV truncation)
+    static std::vector<uint8_t> truncateLowBe(const std::vector<uint8_t>& be_data, uint8_t target_bytes);
+
     // Helper: extract integer from Big Endian byte array
     static uint64_t extractUintBe(const std::vector<uint8_t>& be_data);
 };

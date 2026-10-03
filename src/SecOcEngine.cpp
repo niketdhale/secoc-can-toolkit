@@ -2,6 +2,7 @@
 #include "FreshnessManager.h"
 #include <openssl/cmac.h>
 #include <openssl/evp.h>
+#include <openssl/crypto.h>
 #include <cstring>
 #include <algorithm>
 
@@ -12,11 +13,14 @@ SecOcEngine::SecOcEngine() {
 
 SecOcEngine::~SecOcEngine() = default;
 
-void SecOcEngine::setConfig(const SecOcConfig& cfg) { 
-    m_config = cfg; 
-    if (!m_config.auth_key.empty() && m_config.auth_key.size() != 16) {
-        m_config.auth_key.resize(16, 0);
+bool SecOcEngine::setConfig(const SecOcConfig& cfg) {
+    if (cfg.mac_trunc_length < 1 || cfg.mac_trunc_length > 16 ||
+        cfg.fv_trunc_length < 1 || cfg.fv_trunc_length > 8 ||
+        cfg.auth_key.size() != 16) {
+        return false;
     }
+    m_config = cfg;
+    return true;
 }
 
 void SecOcEngine::setFreshnessProvider(std::unique_ptr<IFreshnessProvider> provider) {
@@ -83,6 +87,12 @@ std::vector<uint8_t> SecOcEngine::truncateBe(const std::vector<uint8_t>& be_data
     return {be_data.begin(), be_data.begin() + take};
 }
 
+std::vector<uint8_t> SecOcEngine::truncateLowBe(const std::vector<uint8_t>& be_data, uint8_t target_bytes) {
+    if (be_data.empty() || target_bytes == 0) return {};
+    size_t take = std::min(static_cast<size_t>(target_bytes), be_data.size());
+    return {be_data.end() - take, be_data.end()};
+}
+
 uint64_t SecOcEngine::extractUintBe(const std::vector<uint8_t>& be_data) {
     uint64_t val = 0;
     for (size_t i = 0; i < std::min(be_data.size(), sizeof(uint64_t)); ++i) {
@@ -91,13 +101,17 @@ uint64_t SecOcEngine::extractUintBe(const std::vector<uint8_t>& be_data) {
     return val;
 }
 
+uint64_t SecOcEngine::getCurrentFreshness() {
+    return extractUintBe(m_active_fv_provider->getFreshness(m_config.data_id).first);
+}
+
 SecOcResult SecOcEngine::wrapTx(const std::vector<uint8_t>& payload) {
     SecOcResult res;
     
     auto [full_fv_bytes, fv_bits] = m_active_fv_provider->getFreshness(m_config.data_id);
     res.freshness_value = extractUintBe(full_fv_bytes);
     
-    std::vector<uint8_t> truncated_fv = truncateBe(full_fv_bytes, m_config.fv_trunc_length);
+    std::vector<uint8_t> truncated_fv = truncateLowBe(full_fv_bytes, m_config.fv_trunc_length);
     
     std::vector<uint8_t> data_to_auth = buildDataToAuthenticator(
         m_config.data_id, payload, full_fv_bytes);
@@ -137,24 +151,40 @@ SecOcResult SecOcEngine::unwrapRx(const SecOcPdu& secured_pdu) {
         return res;
     }
     
-    std::vector<uint8_t> reconstructed_fv(8, 0);
-    size_t offset = 8 - secured_pdu.freshness.size();
-    std::memcpy(reconstructed_fv.data() + offset, 
-                secured_pdu.freshness.data(), 
-                secured_pdu.freshness.size());
-    
-    uint64_t received_fv = extractUintBe(reconstructed_fv);
+    // Next expected FV from the local freshness provider
+    auto [expected_bytes, _] = m_active_fv_provider->getFreshness(m_config.data_id);
+    uint64_t expected = extractUintBe(expected_bytes);
+
+    // Reconstruct full FV: upper bits from local value, low bits from the frame
+    uint64_t received_low = extractUintBe(secured_pdu.freshness);
+    uint64_t received_fv = received_low;
+    if (m_config.fv_trunc_length < 8) {
+        const uint64_t mask = (uint64_t(1) << (8 * m_config.fv_trunc_length)) - 1;
+        received_fv = (expected & ~mask) | received_low;
+        if (received_low < (expected & mask)) {
+            // Low bits wrapped: carry into the upper part (reject on overflow)
+            if (received_fv > UINT64_MAX - (mask + 1)) {
+                res.status = SecOcResult::Status::FreshnessFailed;
+                res.error_detail = "Freshness Value overflow";
+                return res;
+            }
+            received_fv += mask + 1;
+        }
+    }
     res.freshness_value = received_fv;
-    
-    auto [last_fv_bytes, _] = m_active_fv_provider->getFreshness(m_config.data_id);
-    uint64_t last_confirmed = last_fv_bytes.empty() ? 0 : extractUintBe(last_fv_bytes);
-    
-    if (received_fv <= last_confirmed - m_config.acceptance_window) {
+
+    // Anti-replay: expected <= FV <= expected + acceptance_window
+    if (received_fv < expected || received_fv - expected > m_config.acceptance_window) {
         res.status = SecOcResult::Status::FreshnessFailed;
-        res.error_detail = "Stale Freshness Value (anti-replay)";
+        res.error_detail = "Stale or out-of-window Freshness Value (anti-replay)";
         return res;
     }
-    
+
+    std::vector<uint8_t> reconstructed_fv(8, 0);
+    for (int i = 7; i >= 0; --i) {
+        reconstructed_fv[i] = (received_fv >> (8 * (7 - i))) & 0xFF;
+    }
+
     std::vector<uint8_t> data_to_auth = buildDataToAuthenticator(
         m_config.data_id, secured_pdu.payload, reconstructed_fv);
     
@@ -166,7 +196,7 @@ SecOcResult SecOcEngine::unwrapRx(const SecOcPdu& secured_pdu) {
     }
     
     std::vector<uint8_t> expected_truncated = truncateBe(expected_full_mac, m_config.mac_trunc_length);
-    if (std::memcmp(expected_truncated.data(), secured_pdu.mac.data(), m_config.mac_trunc_length) != 0) {
+    if (CRYPTO_memcmp(expected_truncated.data(), secured_pdu.mac.data(), m_config.mac_trunc_length) != 0) {
         res.status = SecOcResult::Status::MacFailed;
         res.error_detail = "MAC verification failed";
         return res;

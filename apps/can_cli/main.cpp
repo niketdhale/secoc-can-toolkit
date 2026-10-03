@@ -8,6 +8,8 @@
 #include <chrono>
 #include <thread>
 #include <cstring>
+#include <cctype>
+#include <stdexcept>
 #include <algorithm> // ADD: for std::remove
 
 static std::string hexDump(const std::vector<uint8_t>& data) {
@@ -18,12 +20,17 @@ static std::string hexDump(const std::vector<uint8_t>& data) {
 }
 
 static std::vector<uint8_t> parseHex(const std::string& hex) {
-    std::vector<uint8_t> out;
-    std::istringstream iss(hex);
-    std::string byte;
-    while (iss >> std::hex >> byte) {
-        if (byte.size() == 2) out.push_back(static_cast<uint8_t>(std::stoul(byte, nullptr, 16)));
+    // Accepts "DEADBEEF", "DE AD BE EF" or mixed; throws std::invalid_argument on bad input
+    std::string clean;
+    for (char c : hex) {
+        if (c == ' ' || c == '\t') continue;
+        if (!std::isxdigit(static_cast<unsigned char>(c))) throw std::invalid_argument("non-hex character in data");
+        clean.push_back(c);
     }
+    if (clean.size() % 2 != 0) throw std::invalid_argument("odd number of hex digits");
+    std::vector<uint8_t> out;
+    for (size_t i = 0; i < clean.size(); i += 2)
+        out.push_back(static_cast<uint8_t>(std::stoul(clean.substr(i, 2), nullptr, 16)));
     return out;
 }
 
@@ -53,8 +60,17 @@ int main() {
             auto hash = raw.find('#');
             if (hash == std::string::npos) { std::cout << "[ERR] Format: tx ID#DATA\n"; continue; }
             
-            uint32_t id = std::stoul(raw.substr(0, hash), nullptr, 16);
-            auto data = parseHex(raw.substr(hash + 1));
+            uint32_t id;
+            std::vector<uint8_t> data;
+            try {
+                unsigned long id_ul = std::stoul(raw.substr(0, hash), nullptr, 16);
+                if (id_ul > 0x1FFFFFFF) { std::cout << "[ERR] ID out of range (max 0x1FFFFFFF)\n"; continue; }
+                id = static_cast<uint32_t>(id_ul);
+                data = parseHex(raw.substr(hash + 1));
+            } catch (const std::exception& e) {
+                std::cout << "[ERR] Invalid tx argument: " << e.what() << "\n";
+                continue;
+            }
             
             CanFrame frame{id, id > 0x7FF, false, data, 0};
             
@@ -96,9 +112,22 @@ int main() {
                     if (eq == std::string::npos) continue;
                     std::string k = param.substr(0, eq);
                     std::string v = param.substr(eq + 1);
-                    if (k == "data_id") cfg.data_id = std::stoul(v, nullptr, 16);
-                    else if (k == "fv") cfg.fv_trunc_length = std::stoul(v);
-                    else if (k == "mac") cfg.mac_trunc_length = std::stoul(v);
+                    try {
+                    if (k == "data_id") {
+                        unsigned long n = std::stoul(v, nullptr, 16);
+                        if (n > 0xFFFF) throw std::out_of_range("data_id > 0xFFFF");
+                        cfg.data_id = static_cast<uint16_t>(n);
+                    }
+                    else if (k == "fv") {
+                        unsigned long n = std::stoul(v);
+                        if (n > 255) throw std::out_of_range("fv > 255");
+                        cfg.fv_trunc_length = static_cast<uint8_t>(n);
+                    }
+                    else if (k == "mac") {
+                        unsigned long n = std::stoul(v);
+                        if (n > 255) throw std::out_of_range("mac > 255");
+                        cfg.mac_trunc_length = static_cast<uint8_t>(n);
+                    }
                     else if (k == "key") {
                         // ✅ FIXED: Robust hex parser for continuous or spaced keys
                         cfg.auth_key.clear();
@@ -116,8 +145,14 @@ int main() {
                             std::cout << "[WARN] Key parsed as " << cfg.auth_key.size() << " bytes (expected 16 for AES-128)\n";
                         }
                     }
+                    } catch (const std::exception& e) {
+                        std::cout << "[ERR] Bad value for '" << k << "': " << e.what() << "\n";
+                    }
                 }
-                secoc.setConfig(cfg);
+                if (!secoc.setConfig(cfg)) {
+                    std::cout << "[ERR] Invalid config (need 1<=mac<=16, 1<=fv<=8, 16-byte key); not applied\n";
+                    continue;
+                }
                 std::cout << "[SecOC] Config updated | DataId=0x" << std::hex << cfg.data_id << std::dec 
                           << " FV=" << static_cast<int>(cfg.fv_trunc_length) 
                           << " MAC=" << static_cast<int>(cfg.mac_trunc_length)
@@ -130,13 +165,14 @@ int main() {
                 c_cfg.SecOCFreshnessValueTruncLength = 4;
                 c_cfg.SecOCAuthInfoTruncLength = 4;
                 c_cfg.SecOCAuthKey = test_key;
+                c_cfg.SecOCRxAcceptanceWindow = 1000;
                 
                 uint8_t ret = SecOc_Init(&c_cfg);
                 if (ret == SECOC_E_OK) {
                     std::cout << "[SecOC C API] Init OK\n";
                     uint8_t payload[] = {0xDE, 0xAD, 0xBE, 0xEF};
                     uint8_t secured_buf[64];
-                    uint16_t secured_len = 0;
+                    uint16_t secured_len = sizeof(secured_buf); // in: capacity
                     
                     ret = SecOc_Transmit(0x123, payload, sizeof(payload), secured_buf, &secured_len);
                     if (ret == SECOC_E_OK) {
